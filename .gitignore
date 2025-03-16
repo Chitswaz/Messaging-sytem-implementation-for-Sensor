@@ -1,0 +1,80 @@
+# Created using https://www.toptal.com/developers/gitignore/api/c++,codeblocks,xcode,visualstudiocode
+
+### C++ ###
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+### CMake ###
+build/
+
+### CodeBlocks ###
+bin/
+obj/
+*.cbp
+*.depend
+*.layout
+
+### VisualStudioCode ###
+.vscode/
+*.code-workspace
+tasks.json
+.history
+
+### Visual Studio ###
+.vs/
+
+### CLion ###
+.idea/
+*.iml
+*.iws
+
+### Xcode ###
+xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+/*.gcno
+*.xcodeproj/*
+**/xcshareddata/WorkspaceSettings.xcsettings
+
+### CodeLite ###
+.codelite/
+*.mk
+*.project
+*.workspace
+compile_commands.json
+
+### macOS ###
+*.DS_Store
+.AppleDouble
+.LSOverride
+
+### Other files ###
+*.pdf
+*.zip
+Makefile
