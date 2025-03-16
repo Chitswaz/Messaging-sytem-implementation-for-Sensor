@@ -3,6 +3,9 @@
 #include <functional>
 #include <iostream>
 #include <vector>
+#include <queue>
+#include <mutex>
+#include <thread>
 
 // Event type enum
 enum class SensorType
@@ -78,7 +81,8 @@ private:
     double lastReading_;
 };
 
-class PressureSensor : public Sensor {
+class PressureSensor : public Sensor
+{
 public:
     PressureSensor(std::string sensorId, double threshold)
         : Sensor(sensorId, SensorType::PRESSURE, threshold), lastReading_(0) {}
@@ -86,7 +90,8 @@ public:
     double getLastReading() const override { return lastReading_; }
 
 protected:
-    bool checkThreshold(double value) override {
+    bool checkThreshold(double value) override
+    {
         lastReading_ = value;
         return value < threshold_; // Trigger event if pressure falls below threshold
     }
@@ -95,7 +100,8 @@ private:
     double lastReading_;
 };
 
-class HumiditySensor : public Sensor {
+class HumiditySensor : public Sensor
+{
 public:
     HumiditySensor(std::string sensorId, double threshold)
         : Sensor(sensorId, SensorType::HUMIDITY, threshold), lastReading_(0) {}
@@ -103,7 +109,8 @@ public:
     double getLastReading() const override { return lastReading_; }
 
 protected:
-    bool checkThreshold(double value) override {
+    bool checkThreshold(double value) override
+    {
         lastReading_ = value;
         return value > threshold_; // Trigger event if humidity exceeds threshold
     }
@@ -112,7 +119,8 @@ private:
     double lastReading_;
 };
 
-class UnknownSensor : public Sensor {
+class UnknownSensor : public Sensor
+{
 public:
     UnknownSensor(std::string sensorId, double threshold)
         : Sensor(sensorId, SensorType::UNKNOWN, threshold), lastReading_(0) {}
@@ -120,7 +128,8 @@ public:
     double getLastReading() const override { return lastReading_; }
 
 protected:
-    bool checkThreshold(double value) override {
+    bool checkThreshold(double value) override
+    {
         lastReading_ = value;
         return false; // Unknown sensors do not trigger events
     }
@@ -129,48 +138,73 @@ private:
     double lastReading_;
 };
 
-class Broker {
+class Broker
+{
 public:
-    void subscribe(const std::function<void(std::shared_ptr<Sensor>)> &subscriber) {
+    void subscribe(const std::function<void(std::shared_ptr<Sensor>)> &subscriber)
+    {
         subscribers.push_back(subscriber);
     }
 
-    void receiveEvent(std::shared_ptr<Sensor> sensor) {
-        for (const auto &subscriber : subscribers) {
-            subscriber(sensor);
+    void receiveEvent(std::shared_ptr<Sensor> sensor)
+    {
+        std::lock_guard<std::mutex> lock(queueMutex);
+        messageQueue.push(sensor);
+    }
+
+    void processQueue()
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        std::lock_guard<std::mutex> lock(queueMutex);
+        while (!messageQueue.empty())
+        {            
+            for (const auto &subscriber : subscribers)
+            {
+                subscriber(messageQueue.front());
+            }
+            messageQueue.pop();
         }
     }
 
 private:
     std::vector<std::function<void(std::shared_ptr<Sensor>)>> subscribers;
+    std::queue<std::shared_ptr<Sensor>> messageQueue;
+    std::mutex queueMutex;
 };
 
-void subscriberFunction(std::shared_ptr<Sensor> sensor) {
-    if (!sensor) return;
+void subscriberFunction(std::shared_ptr<Sensor> sensor)
+{
+    if (!sensor)
+        return;
 
     // Try casting to TemperatureSensor
-    if (auto tempSensor = std::dynamic_pointer_cast<TemperatureSensor>(sensor)) {
+    if (auto tempSensor = std::dynamic_pointer_cast<TemperatureSensor>(sensor))
+    {
         std::cout << "🔥 ALERT! Temperature sensor " << tempSensor->getSensorId()
                   << " reported high temperature: " << tempSensor->getLastReading() << "°C" << std::endl;
     }
     // Try casting to PressureSensor
-    else if (auto pressureSensor = std::dynamic_pointer_cast<PressureSensor>(sensor)) {
+    else if (auto pressureSensor = std::dynamic_pointer_cast<PressureSensor>(sensor))
+    {
         std::cout << "⚠️ WARNING! Pressure sensor " << pressureSensor->getSensorId()
                   << " reported low pressure: " << pressureSensor->getLastReading() << " PSI" << std::endl;
     }
     // Try casting to HumiditySensor
-    else if (auto humiditySensor = std::dynamic_pointer_cast<HumiditySensor>(sensor)) {
+    else if (auto humiditySensor = std::dynamic_pointer_cast<HumiditySensor>(sensor))
+    {
         std::cout << "💧 NOTICE! Humidity sensor " << humiditySensor->getSensorId()
                   << " reported high humidity: " << humiditySensor->getLastReading() << "%" << std::endl;
     }
     // Handle unknown sensor types
-    else {
+    else
+    {
         std::cout << "❓ UNKNOWN! Sensor " << sensor->getSensorId()
                   << " of unknown type reported value: " << sensor->getLastReading() << std::endl;
     }
 }
 
-int main() {
+int main()
+{
     auto tempSensor = std::make_shared<TemperatureSensor>("temp1", 30.0);
     auto pressureSensor = std::make_shared<PressureSensor>("pressure1", 15.0);
     auto humiditySensor = std::make_shared<HumiditySensor>("humidity1", 80.0);
@@ -181,27 +215,27 @@ int main() {
     broker.subscribe(subscriberFunction);
 
     // Connect sensors to the broker
-    tempSensor->setBroker([&broker](std::shared_ptr<Sensor> sensor) {
-        broker.receiveEvent(sensor);
-    });
+    tempSensor->setBroker([&broker](std::shared_ptr<Sensor> sensor)
+                          { broker.receiveEvent(sensor); });
 
-    pressureSensor->setBroker([&broker](std::shared_ptr<Sensor> sensor) {
-        broker.receiveEvent(sensor);
-    });
+    pressureSensor->setBroker([&broker](std::shared_ptr<Sensor> sensor)
+                              { broker.receiveEvent(sensor); });
 
-    humiditySensor->setBroker([&broker](std::shared_ptr<Sensor> sensor) {
-        broker.receiveEvent(sensor);
-    });
+    humiditySensor->setBroker([&broker](std::shared_ptr<Sensor> sensor)
+                              { broker.receiveEvent(sensor); });
 
-    unknownSensor->setBroker([&broker](std::shared_ptr<Sensor> sensor) {
-        broker.receiveEvent(sensor);
-    });
+    unknownSensor->setBroker([&broker](std::shared_ptr<Sensor> sensor)
+                             { broker.receiveEvent(sensor); });
+
+    std::thread queueProcessor(&Broker::processQueue, &broker);
 
     // Simulate sensor readings
-    tempSensor->readValue(32.5);   // High temperature alert
-    pressureSensor->readValue(12.0);  // Low pressure warning
-    humiditySensor->readValue(85.0);  // High humidity notice
-    unknownSensor->readValue(99.9);   // Unknown sensor reading
+    tempSensor->readValue(32.5);     // High temperature alert
+    pressureSensor->readValue(12.0); // Low pressure warning
+    humiditySensor->readValue(85.0); // High humidity notice
+    unknownSensor->readValue(99.9);  // Unknown sensor reading
+
+    queueProcessor.join();
 
     return 0;
 }
