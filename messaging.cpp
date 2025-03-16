@@ -7,6 +7,8 @@
 #include <mutex>
 #include <thread>
 #include <chrono>
+#include <atomic>
+#include <condition_variable>
 
 // Event type enum
 enum class SensorType
@@ -135,33 +137,68 @@ private:
 
 class Broker {
 public:
+    Broker() : running_(true) {}
+
+    ~Broker() {
+        stop(); // Stop the thread when the broker is destroyed
+    }
+
     void subscribe(const std::function<void(std::shared_ptr<Sensor>)> &subscriber) {
+        std::lock_guard<std::mutex> lock(queueMutex);
         subscribers.push_back(subscriber);
     }
 
     void receiveEvent(std::shared_ptr<Sensor> sensor) {
-        std::lock_guard<std::mutex> lock(queueMutex); // Ensure thread-safe access to the queue
+        std::lock_guard<std::mutex> lock(queueMutex);
         messageQueue.push(sensor);
+        queueCond.notify_one(); // Notify the processing thread
     }
 
     void processQueue() {
         while (true) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(500)); // Simulate processing delay
-            std::lock_guard<std::mutex> lock(queueMutex); // Ensure thread-safe access to the queue
+            std::unique_lock<std::mutex> lock(queueMutex);
+            queueCond.wait(lock, [this] { return !messageQueue.empty() || !running_; });
+
+            if (!running_ && messageQueue.empty()) {
+                break; // Exit if stopped and queue is empty
+            }
+
             while (!messageQueue.empty()) {
                 auto sensor = messageQueue.front();
                 messageQueue.pop();
+                lock.unlock(); // Unlock while processing the event
+
                 for (const auto &subscriber : subscribers) {
                     subscriber(sensor);
                 }
+
+                lock.lock(); // Re-lock for the next iteration
             }
         }
+    }
+
+    void stop() {
+        {
+            std::lock_guard<std::mutex> lock(queueMutex);
+            running_ = false; // Signal the thread to stop
+            queueCond.notify_all(); // Wake up the thread
+        }
+        if (queueProcessor.joinable()) {
+            queueProcessor.join(); // Wait for the thread to finish
+        }
+    }
+
+    void start() {
+        queueProcessor = std::thread(&Broker::processQueue, this); // Start the thread
     }
 
 private:
     std::vector<std::function<void(std::shared_ptr<Sensor>)>> subscribers;
     std::queue<std::shared_ptr<Sensor>> messageQueue;
     std::mutex queueMutex; // Mutex to protect the queue
+    std::condition_variable queueCond; // Condition variable for thread synchronization
+    std::thread queueProcessor; // Thread for processing the queue
+    std::atomic<bool> running_; // Flag to control the thread
 };
 
 void subscriberFunction(std::shared_ptr<Sensor> sensor) {
@@ -216,8 +253,8 @@ int main() {
         broker.receiveEvent(sensor);
     });
 
-    // Start a thread to process the message queue
-    std::thread queueProcessor(&Broker::processQueue, &broker);
+    // Start the queue processing thread
+    broker.start();
 
     // Simulate sensor readings
     tempSensor->readValue(32.5);   // High temperature alert
@@ -225,8 +262,11 @@ int main() {
     humiditySensor->readValue(85.0);  // High humidity notice
     unknownSensor->readValue(99.9);   // Unknown sensor reading
 
-    // Keep the main thread alive to allow the queue processor to work
-    queueProcessor.join();
+    // Give the thread some time to process the queue
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+
+    // Stop the broker and wait for the thread to finish
+    broker.stop();
 
     return 0;
 }
