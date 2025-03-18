@@ -1,1 +1,1 @@
-# inheritance-and-role-modeling
+# An event driven approach that uses a concurrency model to handle anomalies
